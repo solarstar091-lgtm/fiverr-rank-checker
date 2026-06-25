@@ -1,5 +1,7 @@
 const express = require('express');
 const axios = require('axios');
+const { wrapper } = require('axios-cookiejar-support');
+const { CookieJar } = require('tough-cookie');
 const cheerio = require('cheerio');
 const path = require('path');
 
@@ -9,15 +11,52 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-  'Accept-Language': 'en-US,en;q=0.5',
-  'Accept-Encoding': 'gzip, deflate, br',
-  'Connection': 'keep-alive',
-  'Upgrade-Insecure-Requests': '1',
-  'Cache-Control': 'max-age=0',
-};
+const USER_AGENTS = [
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+];
+
+function randomUA() {
+  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
+
+function delay(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+function randomDelay(min, max) {
+  return delay(Math.floor(Math.random() * (max - min) + min));
+}
+
+function extractSellers(html) {
+  const $ = cheerio.load(html);
+  const sellers = new Set();
+
+  // data-seller-name attribute
+  $('[data-seller-name]').each((_, el) => {
+    const s = $(el).attr('data-seller-name');
+    if (s) sellers.add(s.toLowerCase());
+  });
+
+  // gig URL pattern /username/gig/
+  $('a[href]').each((_, el) => {
+    const href = $(el).attr('href') || '';
+    const m = href.match(/\/([a-z0-9_-]+)\/gig\//i);
+    if (m) sellers.add(m[1].toLowerCase());
+  });
+
+  // embedded JSON data
+  $('script').each((_, el) => {
+    const txt = $(el).html() || '';
+    for (const m of txt.matchAll(/"seller_name"\s*:\s*"([^"]+)"/g)) sellers.add(m[1].toLowerCase());
+    for (const m of txt.matchAll(/"username"\s*:\s*"([^"]+)"/g)) sellers.add(m[1].toLowerCase());
+    for (const m of txt.matchAll(/"seller"\s*:\s*\{[^}]*"name"\s*:\s*"([^"]+)"/g)) sellers.add(m[1].toLowerCase());
+  });
+
+  return [...sellers];
+}
 
 app.get('/api/search', async (req, res) => {
   const { keyword, username, maxPages = 5 } = req.query;
@@ -26,76 +65,70 @@ app.get('/api/search', async (req, res) => {
     return res.status(400).json({ error: 'keyword and username are required' });
   }
 
-  const results = [];
   const targetUsername = username.toLowerCase().trim();
+  const jar = new CookieJar();
+  const client = wrapper(axios.create({ jar, withCredentials: true }));
+
+  const baseHeaders = {
+    'User-Agent': randomUA(),
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'Cache-Control': 'max-age=0',
+  };
+
+  // Warm up session with a homepage visit
+  try {
+    await client.get('https://www.fiverr.com/', { headers: baseHeaders, timeout: 15000 });
+    await randomDelay(1500, 3000);
+  } catch (_) {}
+
+  const results = [];
   let found = false;
   let totalGigsScanned = 0;
 
   try {
     for (let page = 1; page <= parseInt(maxPages); page++) {
       const offset = (page - 1) * 48;
-      const url = `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(keyword)}&offset=${offset}`;
+      const url = `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(keyword)}&offset=${offset}&source=top-bar&search_in=everywhere&search-autocomplete-original-term=${encodeURIComponent(keyword)}`;
 
       let html;
       try {
-        const response = await axios.get(url, {
-          headers: HEADERS,
-          timeout: 15000,
+        const response = await client.get(url, {
+          headers: {
+            ...baseHeaders,
+            'Referer': page === 1 ? 'https://www.fiverr.com/' : `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(keyword)}&offset=${(page - 2) * 48}`,
+            'Sec-Fetch-Site': page === 1 ? 'none' : 'same-origin',
+            'User-Agent': randomUA(),
+          },
+          timeout: 20000,
         });
         html = response.data;
       } catch (err) {
-        results.push({ page, error: `Failed to fetch page ${page}: ${err.message}` });
-        break;
+        const status = err.response?.status;
+        results.push({ page, error: `Failed to fetch page ${page}: ${status ? `HTTP ${status}` : err.message}` });
+        if (status === 403 || status === 429) break;
+        continue;
       }
 
-      const $ = cheerio.load(html);
-      const gigsOnPage = [];
+      const sellers = extractSellers(html);
+      totalGigsScanned += sellers.length;
 
-      // Fiverr gig cards — multiple selector strategies
-      const selectors = [
-        '[data-seller-name]',
-        '.gig-wrapper',
-        '[class*="gig-card"]',
-        'article',
-      ];
+      const pos = sellers.indexOf(targetUsername);
 
-      let found_sellers = new Set();
-
-      // Try data-seller-name attribute
-      $('[data-seller-name]').each((i, el) => {
-        const seller = $(el).attr('data-seller-name') || '';
-        found_sellers.add(seller.toLowerCase());
-      });
-
-      // Try extracting from gig links (e.g. /username/...)
-      $('a[href*="/gig/"]').each((i, el) => {
-        const href = $(el).attr('href') || '';
-        const match = href.match(/\/([^/]+)\/gig\//);
-        if (match) found_sellers.add(match[1].toLowerCase());
-      });
-
-      // Try JSON-LD or embedded JSON data
-      $('script').each((i, el) => {
-        const content = $(el).html() || '';
-        const matches = content.matchAll(/"seller_name"\s*:\s*"([^"]+)"/g);
-        for (const m of matches) found_sellers.add(m[1].toLowerCase());
-        const matches2 = content.matchAll(/"username"\s*:\s*"([^"]+)"/g);
-        for (const m of matches2) found_sellers.add(m[1].toLowerCase());
-      });
-
-      found_sellers.forEach(seller => gigsOnPage.push(seller));
-      totalGigsScanned += gigsOnPage.length;
-
-      const positionOnPage = gigsOnPage.indexOf(targetUsername);
-
-      if (positionOnPage !== -1) {
-        const globalPosition = offset + positionOnPage + 1;
+      if (pos !== -1) {
         results.push({
           page,
           found: true,
-          positionOnPage: positionOnPage + 1,
-          globalPosition,
-          gigsOnPage: gigsOnPage.length,
+          positionOnPage: pos + 1,
+          globalPosition: offset + pos + 1,
+          gigsOnPage: sellers.length,
           totalScanned: totalGigsScanned,
         });
         found = true;
@@ -105,24 +138,16 @@ app.get('/api/search', async (req, res) => {
       results.push({
         page,
         found: false,
-        gigsOnPage: gigsOnPage.length,
+        gigsOnPage: sellers.length,
         totalScanned: totalGigsScanned,
-        sellers: gigsOnPage.slice(0, 5), // preview first 5 for debugging
       });
 
-      if (gigsOnPage.length === 0) break; // no more results
+      if (sellers.length === 0) break;
 
-      // polite delay
-      await new Promise(r => setTimeout(r, 1500));
+      await randomDelay(2000, 4000);
     }
 
-    res.json({
-      keyword,
-      username: targetUsername,
-      found,
-      totalGigsScanned,
-      pages: results,
-    });
+    res.json({ keyword, username: targetUsername, found, totalGigsScanned, pages: results });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
