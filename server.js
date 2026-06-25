@@ -64,16 +64,15 @@ app.get('/api/debug', async (req, res) => {
 
       const info = await page.evaluate(() => {
         const title = document.title;
-        const gigCards = document.querySelectorAll('[class*="gig-card"], .gig-wrapper, article').length;
-        // All 2-segment hrefs (likely /username/gig-slug)
-        const allLinks = [...new Set([...document.querySelectorAll('a[href]')]
-          .map(a => a.getAttribute('href'))
-          .filter(h => h && h.match(/^\/[a-z0-9_-]+\/[a-z0-9-]+$/i))
-        )].slice(0, 20);
-        // First article/card innerHTML for inspection
-        const firstCard = document.querySelector('article, [class*="gig-card"]');
-        const firstCardHtml = firstCard ? firstCard.innerHTML.slice(0, 600) : 'none';
-        return { title, gigCards, allLinks, firstCardHtml };
+        // All absolute hrefs that look like gig pages
+        const gigLinks = [...new Set([...document.querySelectorAll('a[href]')]
+          .map(a => a.href)
+          .filter(h => h && h.includes('fiverr.com/') && !h.match(/fiverr\.com\/(categories|search|cp|pages|\?|#)/) && h.split('/').filter(Boolean).length >= 4)
+        )].slice(0, 15);
+        // Sample all hrefs
+        const sampleHrefs = [...document.querySelectorAll('a[href]')]
+          .map(a => a.href).filter((h,i,a) => a.indexOf(h)===i && h.includes('fiverr')).slice(0, 20);
+        return { title, gigLinks, sampleHrefs };
       });
 
       await page.close();
