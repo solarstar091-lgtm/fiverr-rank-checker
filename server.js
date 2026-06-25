@@ -61,12 +61,17 @@ app.get('/api/debug', async (req, res) => {
       await delay(3000);
 
       const info = await page.evaluate(() => {
-        const links = [...document.querySelectorAll('a[href*="/gig/"]')].slice(0, 5).map(a => a.href);
-        const sellers = [...document.querySelectorAll('[data-seller-name]')].slice(0, 5).map(el => el.getAttribute('data-seller-name'));
-        const gigCards = document.querySelectorAll('[class*="gig-card"], .gig-wrapper, article').length;
-        const bodyText = document.body.innerText.slice(0, 500);
         const title = document.title;
-        return { title, gigCards, links, sellers, bodyText };
+        const gigCards = document.querySelectorAll('[class*="gig-card"], .gig-wrapper, article').length;
+        // All 2-segment hrefs (likely /username/gig-slug)
+        const allLinks = [...new Set([...document.querySelectorAll('a[href]')]
+          .map(a => a.getAttribute('href'))
+          .filter(h => h && h.match(/^\/[a-z0-9_-]+\/[a-z0-9-]+$/i))
+        )].slice(0, 20);
+        // First article/card innerHTML for inspection
+        const firstCard = document.querySelector('article, [class*="gig-card"]');
+        const firstCardHtml = firstCard ? firstCard.innerHTML.slice(0, 600) : 'none';
+        return { title, gigCards, allLinks, firstCardHtml };
       });
 
       await page.close();
