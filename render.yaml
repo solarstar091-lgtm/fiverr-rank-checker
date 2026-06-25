@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: fiverr-rank-checker
+    env: node
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: RENDER
+        value: true
