@@ -118,8 +118,19 @@ app.get('/api/search', async (req, res) => {
           await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
           await delay(3000); // let React render gig cards
 
-          const html = await page.content();
-          const sellers = extractSellers(html);
+          const sellers = await page.evaluate((navSet) => {
+            const result = [];
+            const seen = new Set();
+            for (const a of document.querySelectorAll('a[href]')) {
+              const href = a.href; // absolute URL
+              const m = href.match(/fiverr\.com\/([a-z0-9][a-z0-9_]{1,})\/([\w-]{8,})/i);
+              if (m) {
+                const u = m[1].toLowerCase();
+                if (!navSet.includes(u) && !seen.has(u)) { seen.add(u); result.push(u); }
+              }
+            }
+            return result;
+          }, [...FIVERR_NAV]);
           totalGigsScanned += sellers.length;
 
           const pos = sellers.indexOf(targetUsername);
