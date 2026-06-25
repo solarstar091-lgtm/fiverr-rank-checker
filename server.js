@@ -1,61 +1,45 @@
 const express = require('express');
 const axios = require('axios');
-const { wrapper } = require('axios-cookiejar-support');
-const { CookieJar } = require('tough-cookie');
 const cheerio = require('cheerio');
 const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY || '71ff3fd03f34fa1de776014e6a776368';
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-const USER_AGENTS = [
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
-];
-
-function randomUA() {
-  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
-}
-
 function delay(ms) {
   return new Promise(r => setTimeout(r, ms));
-}
-
-function randomDelay(min, max) {
-  return delay(Math.floor(Math.random() * (max - min) + min));
 }
 
 function extractSellers(html) {
   const $ = cheerio.load(html);
   const sellers = new Set();
 
-  // data-seller-name attribute
   $('[data-seller-name]').each((_, el) => {
     const s = $(el).attr('data-seller-name');
     if (s) sellers.add(s.toLowerCase());
   });
 
-  // gig URL pattern /username/gig/
   $('a[href]').each((_, el) => {
     const href = $(el).attr('href') || '';
     const m = href.match(/\/([a-z0-9_-]+)\/gig\//i);
     if (m) sellers.add(m[1].toLowerCase());
   });
 
-  // embedded JSON data
   $('script').each((_, el) => {
     const txt = $(el).html() || '';
     for (const m of txt.matchAll(/"seller_name"\s*:\s*"([^"]+)"/g)) sellers.add(m[1].toLowerCase());
     for (const m of txt.matchAll(/"username"\s*:\s*"([^"]+)"/g)) sellers.add(m[1].toLowerCase());
-    for (const m of txt.matchAll(/"seller"\s*:\s*\{[^}]*"name"\s*:\s*"([^"]+)"/g)) sellers.add(m[1].toLowerCase());
   });
 
   return [...sellers];
+}
+
+function scraperUrl(targetUrl) {
+  return `https://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=true`;
 }
 
 app.get('/api/search', async (req, res) => {
@@ -66,29 +50,6 @@ app.get('/api/search', async (req, res) => {
   }
 
   const targetUsername = username.toLowerCase().trim();
-  const jar = new CookieJar();
-  const client = wrapper(axios.create({ jar, withCredentials: true }));
-
-  const baseHeaders = {
-    'User-Agent': randomUA(),
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Connection': 'keep-alive',
-    'Upgrade-Insecure-Requests': '1',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
-    'Sec-Fetch-User': '?1',
-    'Cache-Control': 'max-age=0',
-  };
-
-  // Warm up session with a homepage visit
-  try {
-    await client.get('https://www.fiverr.com/', { headers: baseHeaders, timeout: 15000 });
-    await randomDelay(1500, 3000);
-  } catch (_) {}
-
   const results = [];
   let found = false;
   let totalGigsScanned = 0;
@@ -96,19 +57,11 @@ app.get('/api/search', async (req, res) => {
   try {
     for (let page = 1; page <= parseInt(maxPages); page++) {
       const offset = (page - 1) * 48;
-      const url = `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(keyword)}&offset=${offset}&source=top-bar&search_in=everywhere&search-autocomplete-original-term=${encodeURIComponent(keyword)}`;
+      const fiverrUrl = `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(keyword)}&offset=${offset}&source=top-bar&search_in=everywhere`;
 
       let html;
       try {
-        const response = await client.get(url, {
-          headers: {
-            ...baseHeaders,
-            'Referer': page === 1 ? 'https://www.fiverr.com/' : `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(keyword)}&offset=${(page - 2) * 48}`,
-            'Sec-Fetch-Site': page === 1 ? 'none' : 'same-origin',
-            'User-Agent': randomUA(),
-          },
-          timeout: 20000,
-        });
+        const response = await axios.get(scraperUrl(fiverrUrl), { timeout: 60000 });
         html = response.data;
       } catch (err) {
         const status = err.response?.status;
@@ -144,7 +97,7 @@ app.get('/api/search', async (req, res) => {
 
       if (sellers.length === 0) break;
 
-      await randomDelay(2000, 4000);
+      await delay(1000);
     }
 
     res.json({ keyword, username: targetUsername, found, totalGigsScanned, pages: results });
