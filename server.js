@@ -18,25 +18,31 @@ function delay(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-// Fiverr gig URL format: /username/gig-slug (no /gig/ segment)
 const FIVERR_NAV = new Set(['categories','subcategories','pro','search','users','pages','support',
   'find-services','get-inspired','fiverr-pro','logo-maker','logo-design','hire','gig','cp',
   'seller','buyer','stories','blog','community','about','press','partnerships','privacy',
-  'terms','help','contact','start_selling','new','popular','featured','business']);
+  'terms','help','contact','start_selling','new','popular','featured','business','agencies',
+  'login','join','start-selling','health','legal','jobs','jobs-old','social-impact','invite',
+  'freelancer','freelancers','gigs','logo-designer','explore']);
 
 function extractSellers(html) {
   const sellers = new Set();
 
-  // Primary: gig URLs in the form /username/gig-slug
-  for (const m of html.matchAll(/href="\/([a-z0-9][a-z0-9_]{2,})\/([\w-]{15,})(?:\?|")/gi)) {
-    const username = m[1].toLowerCase();
-    if (!FIVERR_NAV.has(username)) sellers.add(username);
+  // Match both absolute and relative gig URLs: fiverr.com/username/gig-slug or /username/gig-slug
+  const patterns = [
+    /fiverr\.com\/([a-z0-9][a-z0-9_]{1,})\/([\w-]{10,})(?:\?|")/gi,
+    /href="\/([a-z0-9][a-z0-9_]{1,})\/([\w-]{10,})(?:\?|")/gi,
+  ];
+
+  for (const pattern of patterns) {
+    for (const m of html.matchAll(pattern)) {
+      const username = m[1].toLowerCase();
+      if (!FIVERR_NAV.has(username)) sellers.add(username);
+    }
   }
 
-  // Secondary: explicit seller/username JSON fields
+  // Fallback: JSON fields
   for (const m of html.matchAll(/"seller_name"\s*:\s*"([^"]+)"/g))
-    sellers.add(m[1].toLowerCase());
-  for (const m of html.matchAll(/data-seller-name="([^"]+)"/gi))
     sellers.add(m[1].toLowerCase());
 
   return [...sellers];
