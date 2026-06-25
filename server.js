@@ -57,6 +57,23 @@ async function getBrowser() {
   return browserInstance;
 }
 
+app.get('/api/debug', async (req, res) => {
+  let page;
+  try {
+    const browser = await getBrowser();
+    page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 800 });
+    await page.goto('https://www.fiverr.com/search/gigs?query=logo+design', { waitUntil: 'networkidle2', timeout: 60000 });
+    await delay(3000);
+    const html = await page.content();
+    await page.close();
+    res.send(`<pre>${html.slice(0, 5000).replace(/</g,'&lt;')}</pre>`);
+  } catch (err) {
+    if (page) await page.close().catch(() => {});
+    res.send('Error: ' + err.message);
+  }
+});
+
 app.get('/api/search', async (req, res) => {
   const { keyword, username, maxPages = 5 } = req.query;
 
