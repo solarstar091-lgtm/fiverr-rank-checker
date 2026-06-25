@@ -16,19 +16,25 @@ function delay(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
+// Fiverr gig URL format: /username/gig-slug (no /gig/ segment)
+const FIVERR_NAV = new Set(['categories','subcategories','pro','search','users','pages','support',
+  'find-services','get-inspired','fiverr-pro','logo-maker','logo-design','hire','gig','cp',
+  'seller','buyer','stories','blog','community','about','press','partnerships','privacy',
+  'terms','help','contact','start_selling','new','popular','featured','business']);
+
 function extractSellers(html) {
   const sellers = new Set();
 
-  for (const m of html.matchAll(/href="\/([a-z0-9_-]+)\/gig\//gi))
-    sellers.add(m[1].toLowerCase());
+  // Primary: gig URLs in the form /username/gig-slug
+  for (const m of html.matchAll(/href="\/([a-z0-9][a-z0-9_]{2,})\/([\w-]{15,})(?:\?|")/gi)) {
+    const username = m[1].toLowerCase();
+    if (!FIVERR_NAV.has(username)) sellers.add(username);
+  }
 
+  // Secondary: explicit seller/username JSON fields
   for (const m of html.matchAll(/"seller_name"\s*:\s*"([^"]+)"/g))
     sellers.add(m[1].toLowerCase());
-
   for (const m of html.matchAll(/data-seller-name="([^"]+)"/gi))
-    sellers.add(m[1].toLowerCase());
-
-  for (const m of html.matchAll(/"username"\s*:\s*"([a-z0-9_-]+)"/gi))
     sellers.add(m[1].toLowerCase());
 
   return [...sellers];
