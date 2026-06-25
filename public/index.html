@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fiverr Gig Rank Checker</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #f0f4f8;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 16px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 36px;
+    }
+
+    header h1 {
+      font-size: 2rem;
+      color: #1dbf73;
+      font-weight: 700;
+    }
+
+    header p {
+      color: #555;
+      margin-top: 6px;
+      font-size: 0.95rem;
+    }
+
+    .card {
+      background: white;
+      border-radius: 14px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+      padding: 32px;
+      width: 100%;
+      max-width: 560px;
+    }
+
+    label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 6px;
+      margin-top: 18px;
+    }
+
+    label:first-of-type { margin-top: 0; }
+
+    input, select {
+      width: 100%;
+      padding: 11px 14px;
+      border: 1.5px solid #ddd;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input:focus, select:focus { border-color: #1dbf73; }
+
+    button {
+      margin-top: 24px;
+      width: 100%;
+      padding: 13px;
+      background: #1dbf73;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    button:hover { background: #19a463; }
+    button:disabled { background: #aaa; cursor: not-allowed; }
+
+    #result {
+      margin-top: 28px;
+      width: 100%;
+      max-width: 560px;
+    }
+
+    .result-card {
+      background: white;
+      border-radius: 14px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+      padding: 24px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+
+    .badge.found { background: #d4f5e4; color: #0d7042; }
+    .badge.not-found { background: #fde8e8; color: #c0392b; }
+
+    .highlight {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #1dbf73;
+      margin: 8px 0;
+    }
+
+    .sub { font-size: 0.85rem; color: #666; }
+
+    .page-list { margin-top: 16px; }
+
+    .page-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      border-radius: 8px;
+      margin-bottom: 6px;
+      font-size: 0.88rem;
+      background: #f7f7f7;
+    }
+
+    .page-item.hit { background: #d4f5e4; }
+    .page-item .pg { font-weight: 600; color: #333; }
+    .page-item .info { color: #666; }
+
+    .spinner {
+      display: none;
+      text-align: center;
+      padding: 30px;
+    }
+
+    .spinner.active { display: block; }
+
+    .dot-loader span {
+      display: inline-block;
+      width: 10px; height: 10px;
+      margin: 0 4px;
+      background: #1dbf73;
+      border-radius: 50%;
+      animation: bounce 1.2s infinite ease-in-out;
+    }
+
+    .dot-loader span:nth-child(2) { animation-delay: 0.2s; }
+    .dot-loader span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes bounce {
+      0%, 80%, 100% { transform: scale(0); }
+      40% { transform: scale(1); }
+    }
+
+    .status-msg { margin-top: 12px; color: #555; font-size: 0.9rem; }
+
+    .error-card {
+      background: #fde8e8;
+      border-radius: 10px;
+      padding: 16px 20px;
+      color: #c0392b;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🔍 Fiverr Gig Rank Checker</h1>
+  <p>Find where your gig appears in Fiverr search results</p>
+</header>
+
+<div class="card">
+  <label for="keyword">Search Keyword</label>
+  <input id="keyword" type="text" placeholder="e.g. logo design, WordPress developer" />
+
+  <label for="username">Your Fiverr Username</label>
+  <input id="username" type="text" placeholder="e.g. johndoe" />
+
+  <label for="maxPages">Pages to Search</label>
+  <select id="maxPages">
+    <option value="3">3 pages (~144 gigs)</option>
+    <option value="5" selected>5 pages (~240 gigs)</option>
+    <option value="10">10 pages (~480 gigs)</option>
+    <option value="20">20 pages (~960 gigs)</option>
+  </select>
+
+  <button id="searchBtn" onclick="runSearch()">Check My Rank</button>
+</div>
+
+<div id="result"></div>
+
+<script>
+  let currentController = null;
+
+  async function runSearch() {
+    const keyword = document.getElementById('keyword').value.trim();
+    const username = document.getElementById('username').value.trim().toLowerCase().replace(/^@/, '');
+    const maxPages = document.getElementById('maxPages').value;
+    const btn = document.getElementById('searchBtn');
+    const resultEl = document.getElementById('result');
+
+    if (!keyword || !username) {
+      alert('Please enter both a keyword and your username.');
+      return;
+    }
+
+    if (currentController) currentController.abort();
+    currentController = new AbortController();
+
+    btn.disabled = true;
+    btn.textContent = 'Searching…';
+
+    resultEl.innerHTML = `
+      <div class="result-card">
+        <div class="spinner active">
+          <div class="dot-loader"><span></span><span></span><span></span></div>
+          <div class="status-msg">Scanning Fiverr search results for <strong>${escHtml(keyword)}</strong>…<br>This may take a moment.</div>
+        </div>
+      </div>`;
+
+    try {
+      const base = window.location.protocol === 'file:' ? 'http://localhost:3000' : '';
+      const res = await fetch(`${base}/api/search?keyword=${encodeURIComponent(keyword)}&username=${encodeURIComponent(username)}&maxPages=${maxPages}`, {
+        signal: currentController.signal
+      });
+      const data = await res.json();
+
+      if (data.error) throw new Error(data.error);
+      renderResult(data, keyword, username);
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      resultEl.innerHTML = `<div class="result-card"><div class="error-card">⚠️ ${escHtml(err.message)}</div></div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Check My Rank';
+    }
+  }
+
+  function renderResult(data, keyword, username) {
+    const resultEl = document.getElementById('result');
+    const foundPage = data.pages.find(p => p.found);
+
+    let html = `<div class="result-card">`;
+
+    if (data.found && foundPage) {
+      html += `
+        <span class="badge found">✓ Found</span>
+        <div class="highlight">#${foundPage.globalPosition} overall</div>
+        <div class="sub">Page ${foundPage.page} · Position ${foundPage.positionOnPage} on that page</div>
+        <div class="sub" style="margin-top:6px">Scanned ${data.totalGigsScanned} gigs across ${data.pages.length} page(s)</div>
+      `;
+    } else {
+      html += `
+        <span class="badge not-found">✗ Not Found</span>
+        <div style="margin:10px 0;font-size:1rem;color:#333;">
+          <strong>${escHtml(username)}</strong> was not found in the top ${data.totalGigsScanned} results for <strong>"${escHtml(keyword)}"</strong>
+        </div>
+        <div class="sub">Try a different keyword or increase the pages to search.</div>
+      `;
+    }
+
+    html += `<div class="page-list">`;
+    for (const p of data.pages) {
+      if (p.error) {
+        html += `<div class="page-item"><span class="pg">Page ${p.page}</span><span class="info" style="color:#c0392b">${escHtml(p.error)}</span></div>`;
+      } else {
+        html += `
+          <div class="page-item ${p.found ? 'hit' : ''}">
+            <span class="pg">Page ${p.page}</span>
+            <span class="info">${p.found ? `🎯 Found at position ${p.positionOnPage}` : `${p.gigsOnPage} gigs scanned`}</span>
+          </div>`;
+      }
+    }
+    html += `</div></div>`;
+
+    resultEl.innerHTML = html;
+  }
+
+  function escHtml(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Enter') runSearch();
+  });
+</script>
+</body>
+</html>
