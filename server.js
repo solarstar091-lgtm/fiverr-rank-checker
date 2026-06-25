@@ -39,23 +39,24 @@ function extractSellers(html) {
 let browserInstance = null;
 
 async function getBrowser() {
-  if (browserInstance && browserInstance.isConnected()) return browserInstance;
+  try {
+    if (browserInstance) {
+      const pages = await browserInstance.pages();
+      if (pages) return browserInstance;
+    }
+  } catch (_) {
+    browserInstance = null;
+  }
 
-  let launchOptions;
-
-  launchOptions = {
+  browserInstance = await puppeteer.launch({
     headless: true,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
-      '--no-zygote',
-      '--single-process',
     ],
-  };
-
-  browserInstance = await puppeteer.launch(launchOptions);
+  });
   return browserInstance;
 }
 
@@ -83,7 +84,7 @@ app.get('/api/search', async (req, res) => {
     await page.setViewport({ width: 1280, height: 800 });
 
     // Warm up with homepage
-    await page.goto('https://www.fiverr.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.goto('https://www.fiverr.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
     await delay(2000);
 
     for (let pg = 1; pg <= parseInt(maxPages); pg++) {
@@ -91,7 +92,7 @@ app.get('/api/search', async (req, res) => {
       const url = `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(keyword)}&offset=${offset}&source=top-bar&search_in=everywhere`;
 
       try {
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await delay(1500);
 
         const html = await page.content();
