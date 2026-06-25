@@ -1,7 +1,7 @@
 const express = require('express');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const chromium = require('@sparticuz/chromium');
+const chromium = require('@sparticuz/chromium').default;
 const path = require('path');
 
 puppeteer.use(StealthPlugin());
