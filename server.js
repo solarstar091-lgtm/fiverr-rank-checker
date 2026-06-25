@@ -48,15 +48,21 @@ async function getBrowser() {
     browserInstance = null;
   }
 
-  browserInstance = await puppeteer.launch({
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-    ],
-  });
+  const token = process.env.BROWSERLESS_TOKEN;
+
+  if (token) {
+    // Use Browserless hosted Chrome — no local Chrome install needed
+    browserInstance = await puppeteer.connect({
+      browserWSEndpoint: `wss://chrome.browserless.io?token=${token}`,
+    });
+  } else {
+    // Local fallback
+    browserInstance = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+    });
+  }
+
   return browserInstance;
 }
 
