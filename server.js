@@ -1,7 +1,6 @@
 const express = require('express');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const chromium = require('@sparticuz/chromium').default;
 const path = require('path');
 
 puppeteer.use(StealthPlugin());
@@ -42,21 +41,19 @@ let browserInstance = null;
 async function getBrowser() {
   if (browserInstance && browserInstance.isConnected()) return browserInstance;
 
-  const isLocal = !process.env.RENDER;
   let launchOptions;
 
-  if (isLocal) {
-    launchOptions = {
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    };
-  } else {
-    launchOptions = {
-      args: chromium.args,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
-    };
-  }
+  launchOptions = {
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--no-zygote',
+      '--single-process',
+    ],
+  };
 
   browserInstance = await puppeteer.launch(launchOptions);
   return browserInstance;

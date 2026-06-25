@@ -9,3 +9,5 @@ services:
         value: production
       - key: RENDER
         value: true
+      - key: PUPPETEER_CACHE_DIR
+        value: /opt/render/project/.render/chromium
