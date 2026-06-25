@@ -46,6 +46,31 @@ async function withBrowser(fn) {
   }
 }
 
+app.get('/api/debug', async (req, res) => {
+  try {
+    await withBrowser(async (browser) => {
+      const page = await browser.newPage();
+      await page.setViewport({ width: 1280, height: 800 });
+      await page.goto('https://www.fiverr.com/search/gigs?query=logo+design', { waitUntil: 'networkidle2', timeout: 60000 });
+      await delay(3000);
+
+      const info = await page.evaluate(() => {
+        const links = [...document.querySelectorAll('a[href*="/gig/"]')].slice(0, 5).map(a => a.href);
+        const sellers = [...document.querySelectorAll('[data-seller-name]')].slice(0, 5).map(el => el.getAttribute('data-seller-name'));
+        const gigCards = document.querySelectorAll('[class*="gig-card"], .gig-wrapper, article').length;
+        const bodyText = document.body.innerText.slice(0, 500);
+        const title = document.title;
+        return { title, gigCards, links, sellers, bodyText };
+      });
+
+      await page.close();
+      res.json(info);
+    });
+  } catch (err) {
+    res.json({ error: err.message });
+  }
+});
+
 app.get('/api/search', async (req, res) => {
   const { keyword, username, maxPages = 5 } = req.query;
 
