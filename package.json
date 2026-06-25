@@ -11,10 +11,13 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@sparticuz/chromium": "^149.0.0",
     "axios": "^1.18.1",
     "axios-cookiejar-support": "^7.0.0",
     "cheerio": "^1.2.0",
     "express": "^5.2.1",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "tough-cookie": "^6.0.1"
   }
 }

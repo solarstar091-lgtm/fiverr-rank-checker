@@ -1,11 +1,13 @@
 const express = require('express');
-const axios = require('axios');
-const cheerio = require('cheerio');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const chromium = require('@sparticuz/chromium');
 const path = require('path');
+
+puppeteer.use(StealthPlugin());
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY || '71ff3fd03f34fa1de776014e6a776368';
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -15,31 +17,49 @@ function delay(ms) {
 }
 
 function extractSellers(html) {
-  const $ = cheerio.load(html);
   const sellers = new Set();
 
-  $('[data-seller-name]').each((_, el) => {
-    const s = $(el).attr('data-seller-name');
-    if (s) sellers.add(s.toLowerCase());
-  });
+  // gig URL pattern /username/gig/
+  for (const m of html.matchAll(/href="\/([a-z0-9_-]+)\/gig\//gi)) {
+    sellers.add(m[1].toLowerCase());
+  }
 
-  $('a[href]').each((_, el) => {
-    const href = $(el).attr('href') || '';
-    const m = href.match(/\/([a-z0-9_-]+)\/gig\//i);
-    if (m) sellers.add(m[1].toLowerCase());
-  });
+  // seller_name in JSON
+  for (const m of html.matchAll(/"seller_name"\s*:\s*"([^"]+)"/g)) {
+    sellers.add(m[1].toLowerCase());
+  }
 
-  $('script').each((_, el) => {
-    const txt = $(el).html() || '';
-    for (const m of txt.matchAll(/"seller_name"\s*:\s*"([^"]+)"/g)) sellers.add(m[1].toLowerCase());
-    for (const m of txt.matchAll(/"username"\s*:\s*"([^"]+)"/g)) sellers.add(m[1].toLowerCase());
-  });
+  // data-seller-name
+  for (const m of html.matchAll(/data-seller-name="([^"]+)"/gi)) {
+    sellers.add(m[1].toLowerCase());
+  }
 
   return [...sellers];
 }
 
-function scraperUrl(targetUrl) {
-  return `https://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}&render=true`;
+let browserInstance = null;
+
+async function getBrowser() {
+  if (browserInstance && browserInstance.isConnected()) return browserInstance;
+
+  const isLocal = !process.env.RENDER;
+  let launchOptions;
+
+  if (isLocal) {
+    launchOptions = {
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    };
+  } else {
+    launchOptions = {
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+    };
+  }
+
+  browserInstance = await puppeteer.launch(launchOptions);
+  return browserInstance;
 }
 
 app.get('/api/search', async (req, res) => {
@@ -53,55 +73,66 @@ app.get('/api/search', async (req, res) => {
   const results = [];
   let found = false;
   let totalGigsScanned = 0;
+  let page;
 
   try {
-    for (let page = 1; page <= parseInt(maxPages); page++) {
-      const offset = (page - 1) * 48;
-      const fiverrUrl = `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(keyword)}&offset=${offset}&source=top-bar&search_in=everywhere`;
+    const browser = await getBrowser();
+    page = await browser.newPage();
 
-      let html;
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-US,en;q=0.9',
+    });
+
+    await page.setViewport({ width: 1280, height: 800 });
+
+    // Warm up with homepage
+    await page.goto('https://www.fiverr.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await delay(2000);
+
+    for (let pg = 1; pg <= parseInt(maxPages); pg++) {
+      const offset = (pg - 1) * 48;
+      const url = `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(keyword)}&offset=${offset}&source=top-bar&search_in=everywhere`;
+
       try {
-        const response = await axios.get(scraperUrl(fiverrUrl), { timeout: 60000 });
-        html = response.data;
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await delay(1500);
+
+        const html = await page.content();
+        const sellers = extractSellers(html);
+        totalGigsScanned += sellers.length;
+
+        const pos = sellers.indexOf(targetUsername);
+
+        if (pos !== -1) {
+          results.push({
+            page: pg,
+            found: true,
+            positionOnPage: pos + 1,
+            globalPosition: offset + pos + 1,
+            gigsOnPage: sellers.length,
+            totalScanned: totalGigsScanned,
+          });
+          found = true;
+          break;
+        }
+
+        results.push({ page: pg, found: false, gigsOnPage: sellers.length, totalScanned: totalGigsScanned });
+
+        if (sellers.length === 0) break;
+
+        await delay(1500);
       } catch (err) {
-        const status = err.response?.status;
-        results.push({ page, error: `Failed to fetch page ${page}: ${status ? `HTTP ${status}` : err.message}` });
-        if (status === 403 || status === 429) break;
-        continue;
-      }
-
-      const sellers = extractSellers(html);
-      totalGigsScanned += sellers.length;
-
-      const pos = sellers.indexOf(targetUsername);
-
-      if (pos !== -1) {
-        results.push({
-          page,
-          found: true,
-          positionOnPage: pos + 1,
-          globalPosition: offset + pos + 1,
-          gigsOnPage: sellers.length,
-          totalScanned: totalGigsScanned,
-        });
-        found = true;
+        results.push({ page: pg, error: err.message });
         break;
       }
-
-      results.push({
-        page,
-        found: false,
-        gigsOnPage: sellers.length,
-        totalScanned: totalGigsScanned,
-      });
-
-      if (sellers.length === 0) break;
-
-      await delay(1000);
     }
 
+    await page.close();
     res.json({ keyword, username: targetUsername, found, totalGigsScanned, pages: results });
   } catch (err) {
+    if (page) await page.close().catch(() => {});
+    // Reset browser on crash
+    browserInstance = null;
     res.status(500).json({ error: err.message });
   }
 });
