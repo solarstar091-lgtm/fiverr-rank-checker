@@ -89,8 +89,10 @@ app.get('/api/search', async (req, res) => {
       const url = `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(keyword)}&offset=${offset}&source=top-bar&search_in=everywhere`;
 
       try {
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await delay(1500);
+        await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+        // Wait for gig cards to render
+        await page.waitForSelector('[class*="gig-card"], .gig-wrapper, [data-seller-name], article', { timeout: 15000 }).catch(() => {});
+        await delay(2000);
 
         const html = await page.content();
         const sellers = extractSellers(html);
